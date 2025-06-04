@@ -1,0 +1,2 @@
+input/example/repo_submission/source_repo/initcode filter=lfs diff=lfs merge=lfs -text
+input/example/repo_submission/source_repo/kernel filter=lfs diff=lfs merge=lfs -text
