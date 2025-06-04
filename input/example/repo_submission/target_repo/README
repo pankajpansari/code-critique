@@ -1,0 +1,104 @@
+# Assignment 2: Kernel Threads in xv6
+
+## Overview
+
+This assignment implements kernel-level threads in the xv6 operating system. The core tasks involved creating new system calls (`clone` and `join`), developing a user-level thread library built upon these system calls, and implementing a ticket lock mechanism for synchronization.
+
+## Implemented Features
+
+### 1. System Calls
+
+*   **`int clone(void (*fcn)(void *, void *), void *arg1, void *arg2, void *stack)`:**
+    *   Creates a new kernel thread that shares the address space of the calling process.
+    *   File descriptors are duplicated from the parent.
+    *   The new thread begins execution at the function `fcn`, with `arg1` and `arg2` passed as arguments on its new user `stack`.
+    *   A fake return address (`0xffffffff`) is pushed onto the new thread's stack. Threads are expected to call `exit()`.
+    *   The PID of the new thread is returned to the parent; the child thread's context is set up so `clone` effectively returns 0 for it (though it directly starts `fcn`).
+    *   The user stack provided to `clone` is expected to be one page in size. (Note: A strict page-alignment check in the kernel for the `stack` pointer from user-space `malloc` was relaxed to ensure compatibility with xv6's `malloc`, which does not guarantee `PGSIZE` alignment.)
+
+*   **`int join(void **stack)`:**
+    *   Waits for a child thread (one sharing the same address space) of the calling process to exit.
+    *   Returns the PID of the waited-for child thread, or -1 if no such child threads exist or if an error occurs.
+    *   The base address of the exited child's user stack is copied to the location pointed to by the `stack` argument. This allows the user-level library to free the stack.
+
+### 2. Modifications to Existing System Calls
+
+*   **`wait()`:** Modified to only wait for child processes that *do not* share an address space with the caller (i.e., traditional child processes created by `fork()`, not threads created by `clone()`). It reclaims resources, including the address space (page directory and user memory) if it's the last reference to it.
+*   **`exit()`:** Works for both processes and threads. It transitions the calling process/thread to the `ZOMBIE` state and wakes up its parent. The parent (via `wait()` or `join()`) is responsible for the final cleanup. Address space management ensures that the page directory is freed only when the last process or thread using it exits.
+
+### 3. User-level Thread Library (`ulib.c` and `thread.h`)
+
+*   **`int thread_create(int *tid, void (*start_routine)(void *, void *), void *arg1, void *arg2)`:**
+    *   Allocates a new user stack (one page, using `malloc`).
+    *   Calls the `clone()` system call to create and start the new thread.
+    *   Stores the new thread's PID in the location pointed to by `tid` (if `tid` is not NULL).
+    *   Returns the PID of the newly created thread to the parent. (The child thread begins execution at `start_routine`). Returns -1 on failure.
+
+*   **`int thread_join(void)`:**
+    *   Calls the `join()` system call to wait for any child thread to terminate.
+    *   Frees the user stack of the joined thread (using the stack pointer returned by the `join()` syscall).
+    *   Returns the PID of the joined thread, or -1 on failure.
+
+*   **Ticket Lock Implementation:**
+    *   **`ticket_lock_t`:** A structure defined in `thread.h` to hold the lock state (`ticket` and `turn` counters).
+    *   **`void ticket_lock_init(ticket_lock_t *lk)`:** Initializes a ticket lock.
+    *   **`void ticket_lock_acquire(ticket_lock_t *lk)`:** Acquires the ticket lock. Threads atomically fetch-and-increment the `ticket` counter and then spin-wait until their `ticket` matches the `turn` counter.
+    *   **`void ticket_lock_release(ticket_lock_t *lk)`:** Releases the ticket lock by atomically incrementing the `turn` counter.
+    *   The atomic operations are built using an inline assembly `xaddl` instruction provided via a static inline `xadd` function in `thread.h`.
+
+### 4. Address Space Growth (`sbrk()`)
+
+*   The `sbrk()` system call (via `growproc()`) functions correctly in a multi-threaded process. Since threads share the same page directory (`pgdir`) and thus the same view of the process size (`sz`), an increase in the address space size by one thread is visible to all threads within that process. Existing kernel protections around system calls and `growproc` were found sufficient without requiring new explicit locks for this specific assignment requirement.
+
+## Files Modified/Created
+
+**Kernel Space:**
+
+*   `syscall.h`: Added new system call numbers for `SYS_clone` and `SYS_join`.
+*   `syscall.c`: Added entries for `sys_clone` and `sys_join` to the syscall table.
+*   `proc.h`: Added `is_thread` (int) and `user_stack` (void*) fields to `struct proc`.
+*   `proc.c`:
+    *   Implemented `clone()` function (logic for creating a thread, sharing address space, setting up stack and trap frame).
+    *   Implemented `join()` function (logic for waiting for child threads, returning stack).
+    *   Modified `allocproc()` to initialize new fields in `struct proc`.
+    *   Modified `wait()` to only wait for non-thread children and to correctly handle shared address space deallocation using a helper function `check_and_free_shared_pgdir()`.
+    *   Modified `exit()` (primarily by ensuring it interacts correctly with the modified `wait` and new `join` via the `ZOMBIE` state and parent wakeup, and that `initproc` handles orphaned processes).
+    *   Added helper `check_and_free_shared_pgdir()` for managing `pgdir` reference counting.
+*   `sysproc.c`: Implemented `sys_clone()` and `sys_join()` wrapper functions to handle argument retrieval and call the respective functions in `proc.c`. (The strict stack page-alignment check in `sys_clone` was commented out to allow stacks from user `malloc`).
+*   `defs.h`: Added function prototypes for kernel-internal `clone()` and `join()` (from `proc.c`) to be visible to `sysproc.c`.
+
+**User Space:**
+
+*   `user.h`: Added user-space function prototypes for the new system calls (`clone`, `join`) and the thread library functions (`thread_create`, `thread_join`, lock functions).
+*   `usys.S`: Added assembly stubs for `clone` and `join` system calls.
+*   `ulib.c`:
+    *   Implemented `thread_create()`.
+    *   Implemented `thread_join()`.
+    *   Implemented `ticket_lock_init()`, `ticket_lock_acquire()`, and `ticket_lock_release()`.
+*   `thread.h` (New File):
+    *   Defined `ticket_lock_t` structure.
+    *   Defined the `static inline uint xadd(volatile uint *addr, uint val)` function using `xaddl` assembly.
+    *   Included prototypes for thread library functions (could also be in `user.h`).
+*   `threadtest.c` (New File or Modified Test File): A test program to demonstrate thread creation, joining, and the ticket lock functionality with a shared counter.
+*   `Makefile`:
+    *   Added `_threadtest` to `UPROGS`.
+    *   Ensured `_forktest` links with `umalloc.o` and `printf.o` as necessary due to dependencies introduced by the thread library in `ulib.c`.
+    *   Removed `-Werror` compiler flag.
+
+## How to Build and Test
+
+1.  Ensure the xv6 toolchain is set up.
+2.  From the `xv6-public` directory, run:
+    ```bash
+    make clean
+    make qemu
+    ```
+3.  Inside the QEMU xv6 shell, run the test program:
+    ```bash
+    $ threadtest
+    ```
+    (If you named your test program differently, use that name.)
+
+## Test Program Output
+
+The `threadtest` program (configured with `NUM_THREADS = 2` and `NUM_INCREMENTS = 100000`) produces output similar to the following, demonstrating successful thread creation, execution, joining, and correct synchronization using the ticket lock:

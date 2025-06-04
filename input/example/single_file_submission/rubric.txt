@@ -1,0 +1,44 @@
+Cleanliness/readability
+code is free of clutter: remove all dead code and unused vars/fns
+use of whitespace/indentation is tidy and consistent
+    split long lines if necessary (screenwidth ~120 chars)
+    2-4 spaces per indent level (use spaces to indent instead of tabs to avoid editor inconsistency)
+    whitespace used to visually support logical separation
+variable/function names are consistent and descriptive
+    good naming conventions help avoid need for additional commentary
+    use consistent scheme for capitalization/underscores
+use constants/#define'd/sizeof instead of hardcoded numbers
+comments are present where warranted, prose is correct and helpful
+    overview comments (per-function, per-module) with summary highights
+    inline comments used sparingly where needed to decipher dense/complex lines
+    no excess verbiage that reiterates what code itself already says
+
+Language conventions
+choose the most clean, direct, conventional syntax available to you, e.g. ptr->field instead of (*ptr).field
+be thoughtful/consistent in use of array subscripts versus pointer arithmetic
+    functionally equivalent but more common to use subscript when accessing an individual array element, pointer arithmetic when accessing subarray
+avoid unnecessary use of obscure constructs (such as comma operator, unions)
+use standard language features appropriately, e.g.
+    bool type from stdbool.h, static qualifier on private functions, const for read-only pointers
+
+Program design
+program flow decomposed into manageable, logical pieces
+function interfaces are clean and well-encapsulated
+appropriate algorithms used, coded cleanly
+common code is unified, not duplicated
+    when you need same lines more the once, don't copy and paste -- unify!
+use standard library functions rather than re-implement that functionality, e.g.
+    string manipulation, formatted I/O, sort/search, type conversion, etc.
+
+Data structures
+data structures are well-chosen and appropriate
+no redundant storage/copying of data
+no global variables
+
+Pointers/memory
+no unnecessary levels of indirection in variable/parameter declarations
+uses specific pointee type whenever possible, void* only where required
+low-level pointer manipulation/raw memory ops used only when required
+allocation uses appropriate storage (stack versus heap, based on requirements)
+allocations are of appropriate size
+    use typecasts only and exactly where necessary and appropriate
